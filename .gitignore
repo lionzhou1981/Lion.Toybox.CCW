@@ -1,0 +1,8 @@
+.editorconfig
+.vs
+*.user
+_Release
+*\*.user
+*\bin
+*\obj
+*\app.json

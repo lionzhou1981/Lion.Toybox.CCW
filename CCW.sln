@@ -1,0 +1,55 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31912.275
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CCW.Service", "CCW.Service\CCW.Service.csproj", "{0E149DF4-222F-4749-81C5-A8135D8A094C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CCW.Core", "CCW.Core\CCW.Core.csproj", "{5A64D135-F661-4450-B338-82F47CD16742}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Lion", "..\A.Lion\Lion\Lion.csproj", "{DED7F173-F76F-4879-95A2-7608A6C60ACA}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Lion.Net", "..\A.Lion\Lion.Net\Lion.Net.csproj", "{6914CBFB-668B-429F-8391-35A87D550C3F}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Lion.Data.MySqlClient", "..\A.Lion\Lion.Data.MySqlClient\Lion.Data.MySqlClient.csproj", "{00061929-395B-429D-9EBF-518CACF5A768}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Lion.CryptoCurrency", "..\A.Lion\Lion.CryptoCurrency\Lion.CryptoCurrency.csproj", "{4C98CAAA-3358-4844-A1DB-BD9EE468C79F}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{0E149DF4-222F-4749-81C5-A8135D8A094C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0E149DF4-222F-4749-81C5-A8135D8A094C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0E149DF4-222F-4749-81C5-A8135D8A094C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0E149DF4-222F-4749-81C5-A8135D8A094C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5A64D135-F661-4450-B338-82F47CD16742}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5A64D135-F661-4450-B338-82F47CD16742}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5A64D135-F661-4450-B338-82F47CD16742}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5A64D135-F661-4450-B338-82F47CD16742}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DED7F173-F76F-4879-95A2-7608A6C60ACA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DED7F173-F76F-4879-95A2-7608A6C60ACA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DED7F173-F76F-4879-95A2-7608A6C60ACA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DED7F173-F76F-4879-95A2-7608A6C60ACA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6914CBFB-668B-429F-8391-35A87D550C3F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6914CBFB-668B-429F-8391-35A87D550C3F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6914CBFB-668B-429F-8391-35A87D550C3F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6914CBFB-668B-429F-8391-35A87D550C3F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{00061929-395B-429D-9EBF-518CACF5A768}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{00061929-395B-429D-9EBF-518CACF5A768}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{00061929-395B-429D-9EBF-518CACF5A768}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{00061929-395B-429D-9EBF-518CACF5A768}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4C98CAAA-3358-4844-A1DB-BD9EE468C79F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4C98CAAA-3358-4844-A1DB-BD9EE468C79F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4C98CAAA-3358-4844-A1DB-BD9EE468C79F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4C98CAAA-3358-4844-A1DB-BD9EE468C79F}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C5150DD2-4CF9-4D0C-907B-FDBCEE24D5A4}
+	EndGlobalSection
+EndGlobal
