@@ -16,11 +16,9 @@ namespace CCW.Core
     public static class Common
     {
         public static string Id = "";
-        public static JObject Settings =  new JObject();
+        public static JObject Settings =  new();
         public static string SettingsFile = "";
         public static bool Running = false;
-        public static string DefaultLanguageCode = "en";
-        public static int PageSize = 20;
 
         private static string DB_Host = "";
         private static string DB_Port = "";
