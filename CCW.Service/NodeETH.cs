@@ -287,6 +287,7 @@ namespace CCW.Service
                             _tsql.Fields.Add("amount", "", _amount);
                             _tsql.Fields.Add("status", "", 0);
                             _tsql.Fields.Add("list_at", "", DateTime.UtcNow);
+                            _tsql.Fields.Add("deposit", "", 0);
                             _db.Execute(_tsql.ToSqlCommand());
                             _save++;
                             Common.Log("ListTransactions", $"Step 4: {Chain} {_txid} {_txid} {_address} {_amount}");
@@ -400,6 +401,8 @@ namespace CCW.Service
                                 if (_tx["balance"].Value<decimal>() < (decimal)_row["amount"]) { _confirm = -1; break; }
                                 _confirm = _tx["confirmations"].Value<int>();
 
+                                if (_confirm == (int)_row["confirm"]) { continue; }
+
                                 TSQL _tsql = new TSQL(TSQLType.Update, "wallet_transaction");
                                 if (_confirm > Confirm)
                                 {
@@ -410,6 +413,7 @@ namespace CCW.Service
                                     _tsql.Fields.Add("status", "", -1);
                                 }
                                 _tsql.Fields.Add("confirm", "", _confirm);
+                                _tsql.Fields.Add("deposit", "", 0);
                                 _tsql.Wheres.And("id", "=", _row["id"]);
                                 _db.Execute(_tsql.ToSqlCommand());
                                 Common.Log("CheckTransactions", $"Step 2: {_txid} {_confirm}");
@@ -476,6 +480,7 @@ namespace CCW.Service
                                 _tsql.Fields.Add("confirm", "", _confirm);
                                 _tsql.Fields.Add("confirm_at", "", DateTime.UtcNow);
                                 if (_confirm > Confirm) { _tsql.Fields.Add("status", "", 5); }
+                                _tsql.Fields.Add("withdraw", "", 0);
                                 _tsql.Wheres.And("id", "=", _row["id"]);
                                 _db.Execute(_tsql.ToSqlCommand());
                                 Common.Log("CheckTransactions", $"Step 4: {_txid} {_confirm}");
@@ -603,6 +608,7 @@ namespace CCW.Service
                         {
                             _tsql = new TSQL(TSQLType.Update, "wallet_withdraw");
                             _tsql.Fields.Add("status", "", 1);
+                            _tsql.Fields.Add("withdraw", "", 0);
                             _tsql.Wheres.And("id", "=", _row["id"]);
                             _tsql.Wheres.And("status", "=", 0);
                             _tsql.Wheres.And("chain", "=", Chain);
@@ -627,8 +633,6 @@ namespace CCW.Service
                 {
                     try
                     {
-
-
                         _row["send_status"] = "1";
                         _row["send_result"] = "txid";
                     }
@@ -656,6 +660,7 @@ namespace CCW.Service
                             if (_row["send_status"].ToString() == "-1") { _tsql.Fields.Add("status", "", -9); _failed++; }
                             _tsql.Fields.Add("txid", "", _row["send_result"].ToString());
                             _tsql.Fields.Add("tx_at", "", DateTime.UtcNow);
+                            _tsql.Fields.Add("withdraw", "", 0);
                             _tsql.Wheres.And("id", "=", _row["id"]);
                             _tsql.Wheres.And("status", "=", 1);
                             _tsql.Wheres.And("chain", "=", Chain);
