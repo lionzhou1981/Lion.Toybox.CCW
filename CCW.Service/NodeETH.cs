@@ -31,10 +31,16 @@ namespace CCW.Service
         private static string Host = "";
         private static int Confirm = 999;
         private static string MergeAddress = "";
+        private static decimal MergeBaseline = 0M;
+        private static int MergeGasline = 0;
+        private static int MergeGasLimit = 0;
+
         private static Thread ThreadAddress;
         private static Thread ThreadList;
         private static Thread ThreadCheck;
         private static Thread ThreadSend;
+        private static Thread ThreadSendRaw;
+        private static Thread ThreadMerge;
 
         public static void Init()
         {
@@ -43,6 +49,11 @@ namespace CCW.Service
             Host = Common.Settings["NodeETH"]["Host"].Value<string>();
             Confirm = Common.Settings["NodeETH"]["Confirm"].Value<int>();
             MergeAddress = Common.Settings["NodeETH"]["MergeAddress"].Value<string>();
+            MergeBaseline = Common.Settings["NodeETH"]["MergeBaseline"].Value<decimal>();
+            MergeGasline = Common.Settings["NodeETH"]["MergeGasline"].Value<int>();
+            MergeGasLimit = Common.Settings["NodeETH"]["MergeGasLimit"].Value<int>();
+
+            Geth.Init(Host);
 
             ThreadAddress = new Thread(new ThreadStart(GenerateAddress));
             ThreadAddress.Start();
@@ -55,6 +66,12 @@ namespace CCW.Service
 
             ThreadSend = new Thread(new ThreadStart(SendTransactions));
             ThreadSend.Start();
+
+            ThreadSendRaw = new Thread(new ThreadStart(SendRawTransactions));
+            ThreadSendRaw.Start();
+
+            ThreadMerge = new Thread(new ThreadStart(Merge));
+            ThreadMerge.Start();
         }
 
         #region GenerateAddress
@@ -119,7 +136,7 @@ namespace CCW.Service
                 BigInteger _block = -1;
                 BigInteger _height = -1;
 
-                #region Step 0: 获取补扫区块
+                #region Step 1: 获取补扫区块
                 try
                 {
                     using (DbCommon _db = Common.DbCommonMain)
@@ -132,21 +149,19 @@ namespace CCW.Service
                         _tsql.Wheres.And("status", "=", 0);
                         _tsql.Orders.AscField("id");
                         DataTable _table = _db.GetDataTable(_tsql.ToSqlCommand());
-                        if (_table.Rows.Count == 1)
-                        {
-                            _block = BigInteger.Parse(_table.Rows[0]["block"].ToString());
-                            Common.Log("ListTransactions", $"Step 0: {_block}");
-                        }
+                        if (_table.Rows.Count == 1) { _block = BigInteger.Parse(_table.Rows[0]["block"].ToString()); }
+
+                        Common.Log("ListTransactions", $"Step 1: {_block}");
                     }
                 }
                 catch (Exception _ex)
                 {
                     _block = -1;
-                    Common.Log("ListTransactions", $"Step 0: {_ex}", LogLevel.ERROR);
+                    Common.Log("ListTransactions", $"Step 1: {_ex}", LogLevel.ERROR);
                 }
                 #endregion
 
-                #region Step 1: 获取本地区块
+                #region Step 2: 获取本地区块
                 try
                 {
                     using (DbCommon _db = Common.DbCommonMain)
@@ -157,61 +172,60 @@ namespace CCW.Service
                         _tsql.Fields.Add("block");
                         _tsql.Wheres.And("code", "=", Chain);
                         _local = BigInteger.Parse(_db.GetDataScalar(_tsql.ToSqlCommand()).ToString());
-                        Common.Log("ListTransactions", $"Step 1: {_local}");
+
+                        Common.Log("ListTransactions", $"Step 2: {_local}");
                     }
                 }
                 catch (Exception _ex)
                 {
                     _local = -1;
-                    Common.Log("ListTransactions", $"Step 1: {_ex}", LogLevel.ERROR);
+                    Common.Log("ListTransactions", $"Step 2: {_ex}", LogLevel.ERROR);
                     continue;
                 }
                 #endregion
 
-                #region Step 2: 获取节点区块
+                #region Step 3: 获取节点区块
                 if (_block == -1)
                 {
                     try
                     {
-                        JObject _result = Call("eth_blockNumber");
-                        if (_result == null) { throw new Exception("eth_blockNumber"); }
-
-                        _height =  BigNumberPlus.HexToBigInt(_result["result"].ToString()) - BigInteger.One;
-                        Common.Log("ListTransactions", $"Step 2: {_height}");
+                        _height = Geth.Eth_BlockNumber();
+                        if (_height == -1) { throw new Exception("Eth_BlockNumber failed."); }
+                        Common.Log("ListTransactions", $"Step 3: {_height}");
                     }
                     catch (Exception _ex)
                     {
                         _height = -1;
-                        Common.Log("ListTransactions", $"Step 2: {_ex}", LogLevel.ERROR);
+                        Common.Log("ListTransactions", $"Step 3: {_ex}", LogLevel.ERROR);
                     }
 
-                    if (_local == -1 || _height == -1) { Common.Log("ListTransactions", $"Block count failed. {_local}/{_height}", LogLevel.ERROR); continue; }
+                    if (_local == -1 || _height == -1) { Common.Log("ListTransactions", $"Step 3: Block count failed. {_local}/{_height}", LogLevel.ERROR); continue; }
                     if (_local >= _height) { continue; }
 
                     _block = _local + 1;
                 }
                 #endregion
 
-                #region Step 3: 获取区块数据
+                #region Step 4: 获取区块数据
                 string _hash = "";
                 DateTime _blockAt = DateTime.Parse("1900-1-1 0:0:0.0");
                 JArray _txs = new JArray();
                 try
                 {
-                    JObject _result = Call("eth_getBlockByNumber", "0x" + _block.ToString("X").TrimStart('0'), true);
-                    if (_result == null || !_result.ContainsKey("result") || !_result["result"].Value<JObject>().ContainsKey("transactions")) { throw new Exception($"Get block failed. {_result}"); }
+                    JObject _result = Geth.Eth_GetBlockByNumber(_block);
+                    if (_result == null) { throw new Exception($" Step 4: Eth_GetBlockByNumber failed. {_block}"); }
 
-                    _hash = _result["result"]["hash"].Value<string>().ToLower();
-                    _blockAt = DateTimePlus.JSTime2DateTime(HexPlus.HexToInt64(_result["result"]["timestamp"].Value<string>()));
+                    _hash = _result["hash"].Value<string>().ToLower();
+                    _blockAt = DateTimePlus.JSTime2DateTime(HexPlus.HexToInt64(_result["timestamp"].Value<string>()));
 
                     JArray _arrays = new JArray();
-                    if (_result["result"]["transactions"].Type == JTokenType.Array)
+                    if (_result["transactions"].Type == JTokenType.Array)
                     {
-                        _arrays = _result["result"]["transactions"].Value<JArray>();
+                        _arrays = _result["transactions"].Value<JArray>();
                     }
                     else
                     {
-                        _arrays.Add(_result["result"]["transactions"].Value<JObject>());
+                        _arrays.Add(_result["transactions"].Value<JObject>());
                     }
 
                     for (int i = 0; i < _arrays.Count; i++)
@@ -223,8 +237,9 @@ namespace CCW.Service
                         string _value = Ethereum.HexToDecimal(_tx["value"].ToString());
 
                         BigInteger _blockNumber = BigNumberPlus.HexToBigInt(_tx["blockNumber"].Value<string>());
-                        string _address = _tx["to"].Value<string>();
-
+                        string _address = _tx["to"].Value<string>() + "";
+                        if (_address == "") { continue; }
+                        
                         JObject _child = new JObject();
                         _child["txid"] = _txid;
                         _child["address"] = _address;
@@ -232,16 +247,16 @@ namespace CCW.Service
                         _txs.Add(_child);
                     }
 
-                    Common.Log("ListTransactions", $"Step 3: {_txs.Count}");
+                    Common.Log("ListTransactions", $"Step 4: {_txs.Count}");
                 }
                 catch (Exception _ex)
                 {
-                    Common.Log("ListTransactions", $"Step 3: {_ex}", LogLevel.ERROR);
+                    Common.Log("ListTransactions", $"Step 4: {_ex}", LogLevel.ERROR);
                     continue;
                 }
                 #endregion
 
-                #region Step 4: 保存交易详情
+                #region Step 5: 保存交易详情
                 try
                 {
                     int _null = 0, _find = 0, _save = 0;
@@ -286,11 +301,12 @@ namespace CCW.Service
                             _tsql.Fields.Add("member_id", "", _member_id);
                             _tsql.Fields.Add("amount", "", _amount);
                             _tsql.Fields.Add("status", "", 0);
+                            _tsql.Fields.Add("spent", "", _address == MergeAddress ? 5 : 0);
                             _tsql.Fields.Add("list_at", "", DateTime.UtcNow);
                             _tsql.Fields.Add("deposit", "", 0);
                             _db.Execute(_tsql.ToSqlCommand());
                             _save++;
-                            Common.Log("ListTransactions", $"Step 4: {Chain} {_txid} {_txid} {_address} {_amount}");
+                            Common.Log("ListTransactions", $"Step 5: {Chain} {_txid} {_txid} {_address} {_amount}");
                             #endregion
                         }
 
@@ -339,7 +355,7 @@ namespace CCW.Service
                 }
                 catch (Exception _ex)
                 {
-                    Common.Log("ListTransactions", $"Step 4: {_ex}", LogLevel.ERROR);
+                    Common.Log("ListTransactions", $"Step 5: {_ex}", LogLevel.ERROR);
                     return;
                 }
                 #endregion
@@ -413,6 +429,7 @@ namespace CCW.Service
                                     _tsql.Fields.Add("status", "", -1);
                                 }
                                 _tsql.Fields.Add("confirm", "", _confirm);
+                                _tsql.Fields.Add("confirm_at", "", DateTime.UtcNow);
                                 _tsql.Fields.Add("deposit", "", 0);
                                 _tsql.Wheres.And("id", "=", _row["id"]);
                                 _db.Execute(_tsql.ToSqlCommand());
@@ -594,7 +611,7 @@ namespace CCW.Service
                     _withdrawList = null;
                     Common.Log("SendTransactions", $"Step 1: {_ex}", LogLevel.ERROR);
                 }
-                if (_withdrawList == null) { continue; }
+                if (_withdrawList == null || _withdrawList.Rows.Count == 0) { continue; }
                 #endregion
 
                 #region Step 2: 出账交易锁定
@@ -633,8 +650,11 @@ namespace CCW.Service
                 {
                     try
                     {
+                        string _txid = SendTo(MergeAddress, _row["address"].ToString(), (decimal)_row["amount"]);
+                        if (_txid == "") { throw new Exception($"Send failed."); }
+
                         _row["send_status"] = "1";
-                        _row["send_result"] = "txid";
+                        _row["send_result"] = _txid;
                     }
                     catch (Exception _ex)
                     {
@@ -761,36 +781,289 @@ namespace CCW.Service
         }
         #endregion
 
+        #region Merge
+        private static void Merge()
+        {
+            DateTime _last = DateTime.UtcNow;
+            while (Common.Running)
+            {
+                DateTime _now = DateTime.UtcNow;
+                if ((_now - _last).TotalMinutes < 1) { Thread.Sleep(100); continue; }
+                _last = _now;
+
+                #region Step 1: 获取当前余额
+                string _balanceNumber = "";
+                try
+                {
+                    _balanceNumber = Geth.Eth_GetBalance(MergeAddress);
+                    if (_balanceNumber == "") { throw new Exception($"Eth_GetBalance failed.{MergeAddress}"); }
+
+                    Common.Log("Merge", $"Step 1: {_balanceNumber}");
+                }
+                catch (Exception _ex)
+                {
+                    Common.Log("Merge", $"Step 1: {_ex}", LogLevel.ERROR);
+                    continue;
+                }
+                #endregion
+
+                #region Step 2: 在途归集余额
+                decimal _balanceOTW = 0M;
+                try
+                {
+                    using DbCommon _db = Common.DbCommonMain;
+                    _db.Open();
+
+                    TSQL _tsql = new TSQL(TSQLType.Select, "wallet_transaction");
+                    _tsql.Fields.Add("SUM(amount)");
+                    _tsql.Wheres.And("chain", "=", Chain);
+                    _tsql.Wheres.And("status", "=", 1);
+                    _tsql.Wheres.And("spent", "=", 2);
+                    _balanceOTW = decimal.Parse(0 + _db.GetDataScalar(_tsql.ToSqlCommand()).ToString());
+
+                    Common.Log("Merge", $"Step 2: {_balanceOTW}");
+                }
+                catch (Exception _ex)
+                {
+                    Common.Log("Merge", $"Step 2: {_ex}", LogLevel.ERROR);
+                    continue;
+                }
+                #endregion
+
+                #region Step 3: 余额不足归集
+                try
+                {
+                    decimal _balance = MergeBaseline - Convert.ToDecimal(_balanceNumber) - _balanceOTW;
+                    if (_balance > 0)
+                    {
+                        using (DbCommon _db = Common.DbCommonMain)
+                        {
+                            _db.Open();
+
+                            TSQL _tsql = new TSQL(TSQLType.Select, "wallet_transaction");
+                            _tsql.Limit = 5;
+                            _tsql.Fields.Add("address");
+                            _tsql.Fields.Add("SUM(amount)", "total", "");
+                            _tsql.Wheres.And("chain", "=", Chain);
+                            _tsql.Wheres.And("status", "=", 1);
+                            _tsql.Wheres.And("spent", "=", 0);
+                            _tsql.Groups.Add("address");
+                            _tsql.Orders.DescField("total");
+                            DataTable _table = _db.GetDataTable(_tsql.ToSqlCommand());
+                            Common.Log("Merge", $"Step 3: Addresses {_table.Rows.Count}");
+
+                            foreach (DataRow _row in _table.Rows)
+                            {
+                                string _address = _row["address"].ToString();
+                                _tsql = new TSQL(TSQLType.Select, "wallet_transaction");
+                                _tsql.Wheres.And("address", "=", _row["address"].ToString());
+                                _tsql.Wheres.And("chain", "=", Chain);
+                                _tsql.Wheres.And("status", "=", 1);
+                                _tsql.Wheres.And("spent", "=", 0);
+                                DataTable _details = _db.GetDataTable(_tsql.ToSqlCommand());
+                                Common.Log("Merge", $"Step 3: {_address} {_details.Rows.Count}");
+
+                                IList<long> _ids = new List<long>();
+                                decimal _amount = 0M;
+                                foreach (DataRow _detail in _details.Rows)
+                                {
+                                    _ids.Add((long)_detail["id"]);
+                                    _amount += (decimal)_detail["amount"];
+                                }
+
+                                _tsql = new TSQL(TSQLType.Update, "wallet_transaction");
+                                _tsql.Fields.Add("spent", "", 1);
+                                _tsql.Wheres.And("id", "IN", _ids.ToArray());
+                                _tsql.Wheres.And("status", "=", 1);
+                                _tsql.Wheres.And("spent", "=", 0);
+                                _tsql.Wheres.And("chain", "=", Chain);
+                                _db.Execute(_tsql.ToSqlCommand());
+
+                                string _txid = SendTo(_row["address"].ToString(), MergeAddress, _amount);
+                                if (_txid == "") { Common.Log("Merge", $"Step 3: {string.Join(",", _ids.ToArray())} send failed."); continue; }
+
+                                Common.Log("Merge", $"Step 3: {_txid}");
+
+                                _tsql = new TSQL(TSQLType.Update, "wallet_transaction");
+                                _tsql.Fields.Add("spent", "", 2);
+                                _tsql.Fields.Add("spent_txid", "", _txid);
+                                _tsql.Fields.Add("spent_address", "", MergeAddress);
+                                _tsql.Fields.Add("spent_at", "", DateTime.UtcNow);
+                                _tsql.Wheres.And("id", "IN", _ids.ToArray());
+                                _tsql.Wheres.And("status", "=", 1);
+                                _tsql.Wheres.And("spent", "=", 1);
+                                _tsql.Wheres.And("chain", "=", Chain);
+                                _db.Execute(_tsql.ToSqlCommand());
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Common.Log("Merge", $"Step 3: Skip.");
+                    }
+                }
+                catch (Exception _ex)
+                {
+                    Common.Log("Merge", $"Step 3: {_ex}", LogLevel.ERROR);
+                    continue;
+                }
+
+                #endregion
+
+                #region Step 4: 低费用时归集
+                try
+                {
+                    BigInteger _gasPrice = Geth.Eth_GasPrice();
+                    if (_gasPrice == BigInteger.MinusOne) { Common.Log("SendTo", $"Eth_GasPrice failed.", LogLevel.ERROR); continue; }
+
+                    BigInteger _gasPriceline = BigInteger.Parse(MergeGasline.ToString() + "000000000");
+                    if (_gasPrice > _gasPriceline) { Common.Log("SendTo", $"Gas Price {_gasPrice} > {_gasPriceline}."); continue; }
+
+                    using DbCommon _db = Common.DbCommonMain;
+                    _db.Open();
+
+                    TSQL _tsql = new TSQL(TSQLType.Select, "wallet_transaction");
+                    _tsql.Limit = 1;
+                    _tsql.Fields.Add("address");
+                    _tsql.Fields.Add("SUM(amount)", "total", "");
+                    _tsql.Wheres.And("chain", "=", Chain);
+                    _tsql.Wheres.And("status", "=", 1);
+                    _tsql.Wheres.And("spent", "=", 0);
+                    _tsql.Groups.Add("address");
+                    _tsql.Orders.DescField("total");
+                    DataTable _table = _db.GetDataTable(_tsql.ToSqlCommand());
+                    Common.Log("Merge", $"Step 4: Addresses {_table.Rows.Count}");
+
+                    foreach (DataRow _row in _table.Rows)
+                    {
+                        string _address = _row["address"].ToString();
+                        _tsql = new TSQL(TSQLType.Select, "wallet_transaction");
+                        _tsql.Wheres.And("address", "=", _row["address"].ToString());
+                        _tsql.Wheres.And("chain", "=", Chain);
+                        _tsql.Wheres.And("status", "=", 1);
+                        _tsql.Wheres.And("spent", "=", 0);
+                        DataTable _details = _db.GetDataTable(_tsql.ToSqlCommand());
+                        Common.Log("Merge", $"Step 4: {_address} {_details.Rows.Count}");
+
+                        IList<long> _ids = new List<long>();
+                        decimal _amount = 0M;
+                        foreach (DataRow _detail in _details.Rows)
+                        {
+                            _ids.Add((long)_detail["id"]);
+                            _amount += (decimal)_detail["amount"];
+                        }
+
+                        _tsql = new TSQL(TSQLType.Update, "wallet_transaction");
+                        _tsql.Fields.Add("spent", "", 1);
+                        _tsql.Wheres.And("id", "IN", _ids.ToArray());
+                        _tsql.Wheres.And("status", "=", 1);
+                        _tsql.Wheres.And("spent", "=", 0);
+                        _tsql.Wheres.And("chain", "=", Chain);
+                        _db.Execute(_tsql.ToSqlCommand());
+
+                        string _txid = SendTo(_row["address"].ToString(), MergeAddress, _amount);
+                        if (_txid == "") { Common.Log("Merge", $"Step 4: {string.Join(",", _ids.ToArray())} send failed."); continue; }
+
+                        Common.Log("Merge", $"Step 3: {_txid}");
+
+                        _tsql = new TSQL(TSQLType.Update, "wallet_transaction");
+                        _tsql.Fields.Add("spent", "", 2);
+                        _tsql.Fields.Add("spent_txid", "", _txid);
+                        _tsql.Fields.Add("spent_address", "", MergeAddress);
+                        _tsql.Fields.Add("spent_at", "", DateTime.UtcNow);
+                        _tsql.Wheres.And("id", "IN", _ids.ToArray());
+                        _tsql.Wheres.And("status", "=", 1);
+                        _tsql.Wheres.And("spent", "=", 1);
+                        _tsql.Wheres.And("chain", "=", Chain);
+                        _db.Execute(_tsql.ToSqlCommand());
+                    }
+
+                }
+                catch (Exception _ex)
+                {
+                    Common.Log("Merge", $"Step 4: {_ex}", LogLevel.ERROR);
+                    continue;
+                }
+
+                #endregion
+            }
+        }
+        #endregion
+
+        #region SendTo
+        private static string SendTo(string _from, string _to, decimal _amount, string _private = "")
+        {
+            BigInteger _gas = Geth.Eth_EstimateGas(_from, _to);
+            if (_gas == BigInteger.MinusOne) { Common.Log("SendTo", $"Eth_EstimateGas failed.", LogLevel.ERROR); return ""; }
+
+            BigInteger _gasPrice = Geth.Eth_GasPrice();
+            if (_gasPrice == BigInteger.MinusOne) { Common.Log("SendTo", $"Eth_GasPrice failed.", LogLevel.ERROR); return ""; }
+
+            BigInteger _gasPriceLimit = BigInteger.Parse(MergeGasLimit.ToString() + "000000000");
+            if (_gasPrice > _gasPriceLimit) { _gasPrice = _gasPriceLimit; }
+
+            BigInteger _fee = BigInteger.Multiply(_gas, _gasPrice);
+
+            BigInteger _nonce = Geth.Eth_GetTransactionCount(_from);
+            if (_nonce == BigInteger.MinusOne) { Common.Log("SendTo", $"Eth_GetTransactionCount failed. {_from}", LogLevel.ERROR); return ""; }
+
+            decimal _sendAmount = _amount - new Number(_fee).Value;
+
+            if (_private == "")
+            {
+                using DbCommon _db = Common.DbCommonMain;
+                _db.Open();
+
+                TSQL _tsql = new TSQL(TSQLType.Select, "wallet_address");
+                _tsql.Wheres.And("address", "=", _from);
+                _tsql.Wheres.And("chain", "=", Chain);
+                _tsql.Wheres.And("status", "=", 1);
+                DataTable _table = _db.GetDataTable(_tsql.ToSqlCommand());
+                if (_table.Rows.Count != 1) { Common.Log("SendTo", $"Can not found source. {_from}"); return ""; }
+
+                _private = OpenSSLAes.Decode(_table.Rows[0]["source"].ToString(), Secret);
+            }
+
+            Transaction _tx = new();
+            _tx.ChainId = uint.Parse(ChainId.ToString());
+            _tx.Address = _to;
+            _tx.Value = new Number(_sendAmount);
+            _tx.GasLimit = uint.Parse(_gas.ToString());
+            _tx.GasPrice = new Number(_gasPrice);
+            string _raw = _tx.ToSignedHex(_private);
+
+            string _txid = Geth.Eth_SendRawTransaction("0x" + _raw);
+            if (_txid == "") { Common.Log("SendTo", $"Eth_SendRawTransaction failed. {_raw}", LogLevel.ERROR); return ""; }
+
+            return _txid;
+        }
+        #endregion
+
         #region GetTransaction
         private static JObject GetTransaction(string _txid,out BigInteger _blockNumber)
         {
-            JObject _block, _tx, _receipt, _balance;
+            JObject  _tx, _receipt;
             _blockNumber = 0;
             try
             {
-                _block = Call("eth_blockNumber", "1");
-                if (_block == null) { throw new Exception("Call eth_blockNumber"); }
+                BigInteger _currentNumber = Geth.Eth_BlockNumber();
+                if (_currentNumber == -1) { throw new Exception("Eth_BlockNumber failed."); }
 
-                _tx = Call("eth_getTransactionByHash", "1", _txid);
-                if (_tx == null) { throw new Exception("Call eth_getTransactionByHash"); }
-                _tx = _tx["result"].Value<JObject>();
+                _tx = Geth.Eth_GetTransactionByHash(_txid);
+                if (_tx == null) { throw new Exception("Eth_GetTransactionByHash failed."); }
 
-                _receipt = Call("eth_getTransactionReceipt", "1", _txid);
-                if (_receipt == null) { throw new Exception("Call eth_getTransactionReceipt"); }
-                _receipt = _receipt["result"].Value<JObject>();
+                _receipt = Geth.Eth_GetTransactionReceipt(_txid);
+                if (_receipt == null) { throw new Exception("Eth_GetTransactionReceipt failed."); }
 
                 string _status = _receipt.ContainsKey("status") ? _receipt["status"].Value<string>() : "";
                 string _address = _tx["to"].Value<string>();
 
-                BigInteger _currentNumber = BigNumberPlus.HexToBigInt(_block["result"].Value<string>()) - BigInteger.One;
                 _blockNumber = BigNumberPlus.HexToBigInt(_tx["blockNumber"].Value<string>());
-                BigInteger _confirmNumber = _currentNumber - _blockNumber;
+                BigInteger _confirmNumber = _currentNumber - BigNumberPlus.HexToBigInt(_tx["blockNumber"].Value<string>());
 
-                _balance = Call("eth_getBalance", "1", _address, "latest");
-                if (_balance == null) { throw new Exception($"Call eth_getBalance {_address}"); }
-                _balance = _balance["result"].Value<JObject>();
+                string _balanceNumber = Geth.Eth_GetBalance(_address);
+                if (_balanceNumber == "") { throw new Exception($"Eth_GetBalance failed.{_address}"); }
 
-                string _balanceNumber = Ethereum.HexToDecimal(_balance.Value<string>());
                 string _amountNumber = Ethereum.HexToDecimal(_tx["value"].ToString());
 
                 JObject _result = new JObject();
@@ -805,68 +1078,6 @@ namespace CCW.Service
             {
 
                 Common.Log("GetTransaction", $"{_txid} {_ex}", LogLevel.WARN);
-                return null;
-            }
-        }
-        #endregion
-
-        #region Call
-        private static JObject Call(string _method, params object[] _params)
-        {
-            try
-            {
-                JObject _json = new JObject();
-                _json["jsonrpc"] = "2.0";
-                _json["method"] = _method;
-                _json["id"] = "1";
-
-                JArray _jsonParas = new JArray();
-                foreach (object _e in _params)
-                {
-                    if (_e is KeyValuePair<string, string>)
-                    {
-                        KeyValuePair<string, string> _value = (KeyValuePair<string, string>)_e;
-                        JObject _jchild = new JObject();
-                        _jchild[_value.Key] = _value.Value;
-                        _jsonParas.Add(_jchild);
-                    }
-                    else if (_e is List<KeyValuePair<string, string>>)
-                    {
-                        List<KeyValuePair<string, string>> _childs = (List<KeyValuePair<string, string>>)_e;
-                        JObject _jchild = new JObject();
-                        foreach (KeyValuePair<string, string> _child in _childs) { _jchild[_child.Key] = _child.Value; }
-                        _jsonParas.Add(_jchild);
-                    }
-                    else
-                    {
-                        _jsonParas.Add(_e);
-                    }
-                }
-                _json["params"] = _jsonParas;
-
-                if (_method == "eth_estimateGas"
-                    || _method == "eth_getBalance"
-                    || _method == "eth_gasPrice"
-                    || _method == "eth_blockNumber"
-                    || _method == "eth_sendTransaction") { Console.WriteLine(_json.ToString(Formatting.None)); }
-
-                HttpClient _http = new HttpClient(60000);
-                _http.BeginResponse("POST", Host, "");
-                _http.Request.ContentType = "application/json";
-                _http.EndResponse(Encoding.UTF8.GetBytes(_json.ToString(Formatting.None)));
-                string _result = _http.GetResponseString(Encoding.UTF8);
-
-                if (_method == "eth_estimateGas"
-                    || _method == "eth_getBalance"
-                    || _method == "eth_gasPrice"
-                    || _method == "eth_blockNumber"
-                    || _method == "eth_sendTransaction") { Console.WriteLine(_result); }
-                _http.Dispose();
-
-                return JObject.Parse(_result);
-            }
-            catch
-            {
                 return null;
             }
         }
