@@ -99,7 +99,7 @@ namespace CCW.Service
 
                         for (int i = 0; i < 100; i++)
                         {
-                            Address _address = Address.GetMultisignAddress(_mainnet: Mainnet);
+                            Address _address = Address.GetSegWitAddress(_mainnet: Mainnet);
 
                             string _source = OpenSSLAes.Encode($"{_address.Private}", Secret);
 
@@ -400,7 +400,29 @@ namespace CCW.Service
                 if ((_now - _last).TotalMinutes < 1) { Thread.Sleep(100); continue; }
                 _last = _now;
 
-                #region Step 1: 获取入账交易
+                #region Step 1: 获取节点区块
+                int _height = 0;
+                try
+                {
+                    JObject _result = new JObject {
+                        ["jsonrpc"] = "1.0",
+                        ["id"] = "1",
+                        ["method"] = "getblockcount",
+                        ["params"] = new JArray()
+                    };
+                    _result = Call(_result);
+                    _height = _result["result"].Value<int>();
+                    Common.Log("CheckTransactions", $"Step 1: {_height}");
+                }
+                catch (Exception _ex)
+                {
+                    _height = -1;
+                    Common.Log("CheckTransactions", $"Step 1: {_ex}", LogLevel.ERROR);
+                }
+                if (_height == -1) { Common.Log("CheckTransactions", $"Block count failed. {_height}", LogLevel.ERROR); continue; }
+                #endregion
+
+                #region Step 2: 获取入账交易
                 DataTable _transactionList = null;
                 try
                 {
@@ -412,17 +434,17 @@ namespace CCW.Service
                         _tsql.Wheres.And("status", "=", 0);
                         _tsql.Wheres.And("chain", "=", Chain);
                         _transactionList = _db.GetDataTable(_tsql.ToSqlCommand());
-                        Common.Log("CheckTransactions", $"Step 1: {_transactionList.Rows.Count}");
+                        Common.Log("CheckTransactions", $"Step 2: {_transactionList.Rows.Count}");
                     }
                 }
                 catch (Exception _ex)
                 {
                     _transactionList = null;
-                    Common.Log("CheckTransactions", $"Step 1: {_ex}", LogLevel.ERROR);
+                    Common.Log("CheckTransactions", $"Step 2: {_ex}", LogLevel.ERROR);
                 }
                 #endregion
 
-                #region Step 2: 检查入账交易
+                #region Step 3: 检查入账交易
                 if (_transactionList != null)
                 {
                     try
@@ -441,11 +463,11 @@ namespace CCW.Service
                                     if (_tx["txindex"].Value<string>() != _row["txindex"].ToString()) { continue; }
                                     if (_tx["address"].Value<string>() != _row["address"].ToString()) { _confirm = -1; break; }
                                     if (_tx["amount"].Value<decimal>() != (decimal)_row["amount"]) { _confirm = -1; break; }
+                                    if (_tx["locktime"].Value<int>() >= _height) { _confirm = 0; break; }
 
                                     _confirm = _confirmations;
                                     break;
                                 }
-
                                 if (_confirmations == (int)_row["confirm"]) { continue; }
 
                                 TSQL _tsql = new(TSQLType.Update, "wallet_transaction");
@@ -462,18 +484,18 @@ namespace CCW.Service
                                 _tsql.Fields.Add("deposit", "", 0);
                                 _tsql.Wheres.And("id", "=", _row["id"]);
                                 _db.Execute(_tsql.ToSqlCommand());
-                                Common.Log("CheckTransactions", $"Step 2: {_txid} {_confirm}");
+                                Common.Log("CheckTransactions", $"Step 3: {_txid} {_confirm}");
                             }
                         }
                     }
                     catch (Exception _ex)
                     {
-                        Common.Log("CheckTransactions", $"Step 2: {_ex}", LogLevel.ERROR);
+                        Common.Log("CheckTransactions", $"Step 3: {_ex}", LogLevel.ERROR);
                     }
                 }
                 #endregion
 
-                #region Step 3: 获取出账交易
+                #region Step 4: 获取出账交易
                 DataTable _withdrawList = null;
                 try
                 {
@@ -483,20 +505,20 @@ namespace CCW.Service
 
                         TSQL _tsql = new TSQL(TSQLType.Select, "wallet_withdraw");
                         _tsql.Wheres.And("status", "=", 2);
-                        _tsql.Wheres.And("tx_at", "<", DateTime.UtcNow.AddMinutes(-10));
+                        _tsql.Wheres.And("tx_at", "<", DateTime.UtcNow.AddMinutes(-10).ToString("yyyy-MM-dd HH:mm:ss.fff"));
                         _tsql.Wheres.And("chain", "=", Chain);
                         _withdrawList = _db.GetDataTable(_tsql.ToSqlCommand());
-                        Common.Log("CheckTransactions", $"Step 3: {_withdrawList.Rows.Count}");
+                        Common.Log("CheckTransactions", $"Step 4: {_withdrawList.Rows.Count}");
                     }
                 }
                 catch (Exception _ex)
                 {
                     _withdrawList = null;
-                    Common.Log("CheckTransactions", $"Step 3: {_ex}", LogLevel.ERROR);
+                    Common.Log("CheckTransactions", $"Step 4: {_ex}", LogLevel.ERROR);
                 }
                 #endregion
 
-                #region Step 4: 检查出账交易
+                #region Step 5: 检查出账交易
                 if (_withdrawList != null)
                 {
                     try
@@ -527,18 +549,18 @@ namespace CCW.Service
                                 if (_confirm > Confirm) { _tsql.Fields.Add("status", "", 5); }
                                 _tsql.Wheres.And("id", "=", _row["id"]);
                                 _db.Execute(_tsql.ToSqlCommand());
-                                Common.Log("CheckTransactions", $"Step 4: {_txid} {_confirm}");
+                                Common.Log("CheckTransactions", $"Step 5: {_txid} {_confirm}");
                             }
                         }
                     }
                     catch (Exception _ex)
                     {
-                        Common.Log("CheckTransactions", $"Step 4: {_ex}", LogLevel.ERROR);
+                        Common.Log("CheckTransactions", $"Step 5: {_ex}", LogLevel.ERROR);
                     }
                 }
                 #endregion
 
-                #region Step 5: 获取RAW 交易
+                #region Step 6: 获取RAW 交易
                 DataTable _rawList = null;
                 try
                 {
@@ -548,20 +570,20 @@ namespace CCW.Service
 
                         TSQL _tsql = new TSQL(TSQLType.Select, "wallet_sendraw");
                         _tsql.Wheres.And("status", "=", 2);
-                        _tsql.Wheres.And("tx_at", "<", DateTime.UtcNow.AddMinutes(-10));
+                        _tsql.Wheres.And("tx_at", "<", DateTime.UtcNow.AddMinutes(-10).ToString("yyyy-MM-dd HH:mm:ss.fff"));
                         _tsql.Wheres.And("chain", "=", Chain);
                         _rawList = _db.GetDataTable(_tsql.ToSqlCommand());
-                        Common.Log("CheckTransactions", $"Step 5: {_rawList.Rows.Count}");
+                        Common.Log("CheckTransactions", $"Step 6: {_rawList.Rows.Count}");
                     }
                 }
                 catch (Exception _ex)
                 {
                     _withdrawList = null;
-                    Common.Log("CheckTransactions", $"Step 5: {_ex}", LogLevel.ERROR);
+                    Common.Log("CheckTransactions", $"Step 6: {_ex}", LogLevel.ERROR);
                 }
                 #endregion
 
-                #region Step 6: 检查RAW 交易
+                #region Step 7: 检查RAW 交易
                 if (_rawList != null)
                 {
                     try
@@ -591,13 +613,13 @@ namespace CCW.Service
                                 if (_confirm > Confirm) { _tsql.Fields.Add("status", "", 5); }
                                 _tsql.Wheres.And("id", "=", _row["id"]);
                                 _db.Execute(_tsql.ToSqlCommand());
-                                Common.Log("CheckTransactions", $"Step 4: {_txid} {_confirm}");
+                                Common.Log("CheckTransactions", $"Step 7: {_txid} {_confirm}");
                             }
                         }
                     }
                     catch (Exception _ex)
                     {
-                        Common.Log("CheckTransactions", $"Step 4: {_ex}", LogLevel.ERROR);
+                        Common.Log("CheckTransactions", $"Step 7: {_ex}", LogLevel.ERROR);
                     }
                 }
                 #endregion
@@ -647,7 +669,7 @@ namespace CCW.Service
                     {
                         _amount += (decimal)_row["Amount"];
                     }
-                    _amount += 0.01M;
+                    _amount += 0.0001M;
                     Common.Log("SendTransactions", $"Step 2: {_amount}");
                 }
                 catch (Exception _ex)
@@ -765,15 +787,23 @@ namespace CCW.Service
 
                 #region Step 6: 组合出账交易
                 Transaction _transaction = new Transaction();
-                foreach (DataRow _row in _withdrawList.Rows)
+                try
                 {
-                    _transaction.Vins.Add(new TransactionVin(_row["address"].ToString(), (decimal)_row["amount"]));
+                    foreach (DataRow _row in _withdrawList.Rows)
+                    {
+                        _transaction.Vins.Add(new TransactionVin(_row["address"].ToString(), (decimal)_row["amount"]));
+                    }
+                    foreach (JArray _spent in _spents)
+                    {
+                        _transaction.Vouts.Add(new TransactionVout(_spent[1].Value<string>(), _spent[2].Value<int>(), _spent[4].Value<decimal>(), Private.FromWif(_spent[3].Value<string>(), _spent[5].Value<string>(),out bool _mainnet)));
+                    }
+                    Common.Log("SendTransactions", $"Step 6: {_transaction.Vouts.Count} {_transaction.Vins.Count}");
                 }
-                foreach (JArray _spent in _spents)
+                catch (Exception _ex)
                 {
-                    _transaction.Vouts.Add(new TransactionVout(_spent[1].Value<string>(), _spent[2].Value<int>(), _spent[4].Value<decimal>(), Private.FromHex(_spent[3].Value<string>(), _spent[5].Value<string>())));
+                    Common.Log("SendTransactions", $"Step 6: {_ex}", LogLevel.ERROR);
+                    continue;
                 }
-                Common.Log("SendTransactions", $"Step 5: {_transaction.Vouts.Count} {_transaction.Vins.Count}");
                 #endregion
 
                 #region Step 7: 估算出账费用
@@ -1021,12 +1051,11 @@ namespace CCW.Service
                 return null;
             }
 
-            int _lockTime = _result.ContainsKey("locktime") ? _result["locktime"].Value<int>() : 0;
-            _confirmations = _result.ContainsKey("confirmations") ? _result["confirmations"].Value<int>() : 0;
-            if (_lockTime != 0) { _confirmations = 0; }
-
             _blockhash = _result["blockhash"].Value<string>();
             _blocktime = _result["blocktime"].Value<long>();
+
+            int _lockTime = _result.ContainsKey("locktime") ? _result["locktime"].Value<int>() : 0;
+            _confirmations = _result.ContainsKey("confirmations") ? _result["confirmations"].Value<int>() : 0;
 
             JArray _txList = new();
             JArray _outs = (JArray)_result["vout"];
@@ -1045,6 +1074,7 @@ namespace CCW.Service
                 _item["txindex"] = _out["n"].Value<int>();
                 _item["address"] = _address;
                 _item["amount"] = _value.ToString();
+                _item["locktime"] = _lockTime;
                 _txList.Add(_item);
             }
 
